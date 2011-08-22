@@ -1,0 +1,231 @@
+%
+% Complete documentation on the extended LaTeX markup used for Insight
+% documentation is available in ``Documenting Insight'', which is part
+% of the standard documentation for Insight.  It may be found online
+% at:
+%
+%     http://www.itk.org/
+
+\documentclass{InsightArticle}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%  hyperref should be the last package to be loaded.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage[dvips,
+bookmarks,
+bookmarksopen,
+backref,
+colorlinks,linkcolor={blue},citecolor={blue},urlcolor={blue},
+]{hyperref}
+% to be able to use options in graphics
+\usepackage{graphicx}
+% for pseudo code
+\usepackage{listings}
+% subfigures
+\usepackage{subfigure}
+
+
+%  This is a template for Papers to the Insight Journal. 
+%  It is comparable to a technical report format.
+
+% The title should be descriptive enough for people to be able to find
+% the relevant document. 
+\title{Including TIFF tags in the MetaDataDictionary}
+
+% Increment the release number whenever significant changes are made.
+% The author and/or editor can define 'significant' however they like.
+\release{0.00}
+
+% At minimum, give your name and an email address.  You can include a
+% snail-mail address if you like.
+\author{Richard Beare}
+\authoraddress{Richard.Beare@med.monash.edu.au}
+
+\begin{document}
+\maketitle
+
+\ifhtml
+\chapter*{Front Matter\label{front}}
+\fi
+
+
+\begin{abstract}
+\noindent
+% The abstract should be a paragraph or two long, and describe the
+% scope of the document.
+Tiff images are widely used and domain and instrument specific
+information is often included in some tags. There isn't any standard
+way of making use of this information in ITK at present. This article
+introduces some minor additions to the ITK tiff reader to include the
+content of some potentially useful tags in the image
+MetaDataDictionary, thus enabling domain specific information to be
+extracted from the tags within an ITK application.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction}
+Tiff is a widely used image format that is frequently extended to new
+domains by including information in fields in the tiff directory. The
+directory in tiff files is equivalent to the header in other formats,
+but needn't be at the start of the file, and multi image tiff file
+will have multiple directories.
+
+Most standard image information describing image pixel layout on disk,
+image width, image height, colour encoding and so on is encoded in
+``standard'' tiff fields and is already used by the ITK image
+reader. However additional information that may be useful to some
+applications can be stored in other tiff fields. This article
+describes how a modified tiff reader can make these fields available
+to an ITK application via the MetaDataDictionary.
+
+\section{Domain specific extensions}
+An example of domain specific extensions to tiff is the Open
+Microscopy Environment (OME) tiff format --
+\url{http://www.ome-xml.org/wiki/OmeTiff}. This extension encodes a
+large range of microscopy related meta-data in XML in the tiff {\em
+  ImageDescription} field. 
+
+Correct interpretation of the image by an application may require
+access to information in this field. In many cases a customized reader
+may be more appropriate, but this is not always feasible in the early
+days of using a new format. The extensions described in this article
+provide an intermediate solution.
+
+\section{TIFF fields}
+The fields likely to be relevant to an application include:
+\begin{itemize}
+\item ARTIST
+\item COPYRIGHT
+\item DATETIME
+\item DOCUMENTNAME
+\item HOSTCOMPUTER
+\item IMAGEDESCRIPTION
+\item INKNAMES
+\item MAKE
+\item MODEL
+\item PAGENAME
+\item SOFTWARE
+\item TARGETPRINTER
+\item XMLPACKET
+\end{itemize}
+
+The {\em tiffinfo} tool distributed with libtiff provides a dump of
+these fields that is useful when interpreting a new tiff variant. The
+code in this article makes the same information available to an ITK
+application.
+
+\section{TIFFImageIO modifications}
+Modifications to TIFFImageIO have been made and the files are included
+in the source package. The two files, {\em itkTIFFImageIO.h} and {\em
+  itkTIFFImageIO.cxx} are replacements for existing versions in {\em
+  InsightToolkit/Code/IO}. The examples following assume that ITK has
+been built using these files.
+
+The modifications simply encode the field names and contents in the MetaDataDictionary.
+
+\section{Accessing the fields via the MetaDataDictionary}
+Standard mechanisms can be used to access the contents of the
+MetaDataDictionary, as illustrated below. This example is from {\em check.cxx}, included
+in this package. 
+
+\small \begin{verbatim}
+int main(int argc, char * argv[])
+{
+
+  if( argc != 2 )
+    {
+    std::cerr << "usage: " << argv[0] << " intput " << std::endl;
+    std::cerr << " input: the input image" << std::endl;
+    // std::cerr << "  : " << std::endl;
+    exit(1);
+    }
+
+  const int dim = 2;
+  
+  typedef unsigned char PType;
+  typedef itk::Image< PType, dim > IType;
+
+
+  typedef itk::ImageFileReader< IType > ReaderType;
+  ReaderType::Pointer reader = ReaderType::New();
+  reader->SetFileName( argv[1] );
+  reader->Update();
+
+  typedef itk::MetaDataDictionary   DictionaryType;
+  typedef itk::MetaDataObject< std::string > MetaDataStringType;
+
+  const  DictionaryType & dictionary = reader->GetImageIO()->GetMetaDataDictionary();
+  DictionaryType::ConstIterator itr = dictionary.Begin();
+  DictionaryType::ConstIterator end = dictionary.End();
+  while( itr != end )
+    {
+    itk::MetaDataObjectBase::Pointer  entry = itr->second;
+
+    MetaDataStringType::Pointer entryvalue = 
+      dynamic_cast<MetaDataStringType *>( entry.GetPointer() );
+    if( entryvalue )
+      {
+      std::string tagkey   = itr->first;
+      std::cout << "MetaDataDict " << tagkey << ": " << entryvalue->GetMetaDataObjectValue() << std::endl;
+
+      }
+
+    ++itr;
+    }
+
+  return 0;
+}
+\end{verbatim} \normalsize
+
+\section{Sample output}
+Apply check to an OME tiff included in the package provides the following output (line breaks included for clarity):
+
+\small \begin{verbatim} 
+ > check images/single-channel.ome.tif
+
+ MetaDataDict TIFFTAG_IMAGEDESCRIPTION: <?xml version="1.0"
+ encoding="UTF-8"?><!-- Warning: this comment is an OME-XML metadata
+ block, which contains crucial dimensional parameters and other
+ important metadata. Please edit cautiously (if at all), and back up
+ the original data before doing so. For more information, see the
+ OME-TIFF web site: http://loci.wisc.edu/ome/ome-tiff.html. --><OME
+ xmlns="http://www.openmicroscopy.org/XMLschemas/OME/FC/ome.xsd"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="http://www.openmicroscopy.org/XMLschemas/OME/FC/ome.xsd
+ http://www.openmicroscopy.org/XMLschemas/OME/FC/ome.xsd"><Image
+ ID="openmicroscopy.org:Image:1" Name="single-channel"
+ DefaultPixels="openmicroscopy.org:Pixels:1-1"><CreationDate>2007-11-08T14:52:24</CreationDate><Pixels
+ ID="openmicroscopy.org:Pixels:1-1" DimensionOrder="XYZCT"
+ PixelType="Uint8" BigEndian="true" SizeX="439" SizeY="167" SizeZ="1"
+ SizeC="1" SizeT="1"><TiffData/></Pixels></Image></OME>
+
+\end{verbatim} \normalsize
+
+\section{Conclusions and further work}
+The changes described in this article only provide access to the
+standard fields in which data is stored as text. It is also possible
+for vendors to include proprietary tiff fields, and future versions
+may be able to include this information in the MetaDataDictionary.
+
+However the current version should allow useful, domain specific,
+interpretation of data without major changes to ITK infrastructure and
+thus be useful in early project development. In particular,
+information such as voxel size, scaling parameters and anything else
+that might be relevant to correct image interpretation and encoded as
+strings in tiff tags may be accessed in an ITK application via
+relatively simple string parsing code.
+
+\appendix
+
+
+
+\bibliographystyle{plain}
+\bibliography{InsightJournal}
+\nocite{ITKSoftwareGuide}
+
+\end{document}
+
